@@ -23,6 +23,7 @@ import (
 
 	"github.com/google/blueprint"
 	"github.com/google/blueprint/pathtools"
+	"github.com/google/blueprint/proptools"
 )
 
 var (
@@ -57,6 +58,7 @@ type ModuleBuildParams BuildParams
 type androidBaseContext interface {
 	Target() Target
 	TargetPrimary() bool
+	MultiTargets() []Target
 	Arch() Arch
 	Os() OsType
 	Host() bool
@@ -214,7 +216,8 @@ type commonProperties struct {
 		}
 	}
 
-	Default_multilib string `blueprint:"mutated"`
+	UseTargetVariants bool   `blueprint:"mutated"`
+	Default_multilib  string `blueprint:"mutated"`
 
 	// whether this is a proprietary vendor module, and should be installed into /vendor
 	Proprietary *bool
@@ -263,8 +266,9 @@ type commonProperties struct {
 	Notice *string
 
 	// Set by TargetMutator
-	CompileTarget  Target `blueprint:"mutated"`
-	CompilePrimary bool   `blueprint:"mutated"`
+	CompileTarget       Target   `blueprint:"mutated"`
+	CompileMultiTargets []Target `blueprint:"mutated"`
+	CompilePrimary      bool     `blueprint:"mutated"`
 
 	// Set by InitAndroidModule
 	HostOrDeviceSupported HostOrDeviceSupported `blueprint:"mutated"`
@@ -361,6 +365,7 @@ func InitAndroidArchModule(m Module, hod HostOrDeviceSupported, defaultMultilib 
 	base.commonProperties.HostOrDeviceSupported = hod
 	base.commonProperties.Default_multilib = string(defaultMultilib)
 	base.commonProperties.ArchSpecific = true
+	base.commonProperties.UseTargetVariants = true
 
 	switch hod {
 	case HostAndDeviceSupported, HostAndDeviceDefault:
@@ -368,6 +373,11 @@ func InitAndroidArchModule(m Module, hod HostOrDeviceSupported, defaultMultilib 
 	}
 
 	InitArchModule(m)
+}
+
+func InitAndroidMultiTargetsArchModule(m Module, hod HostOrDeviceSupported, defaultMultilib Multilib) {
+	InitAndroidArchModule(m, hod, defaultMultilib)
+	m.base().commonProperties.UseTargetVariants = false
 }
 
 // A ModuleBase object contains the properties that are common to all Android
@@ -441,6 +451,8 @@ type ModuleBase struct {
 
 	// For tests
 	buildParams []BuildParams
+
+	prefer32 func(ctx BaseModuleContext, base *ModuleBase, class OsClass) bool
 }
 
 func (a *ModuleBase) AddProperties(props ...interface{}) {
@@ -453,6 +465,10 @@ func (a *ModuleBase) GetProperties() []interface{} {
 
 func (a *ModuleBase) BuildParamsForTests() []BuildParams {
 	return a.buildParams
+}
+
+func (a *ModuleBase) Prefer32(prefer32 func(ctx BaseModuleContext, base *ModuleBase, class OsClass) bool) {
+	a.prefer32 = prefer32
 }
 
 // Name returns the name of the module.  It may be overridden by individual module types, for
@@ -470,8 +486,9 @@ func (a *ModuleBase) base() *ModuleBase {
 	return a
 }
 
-func (a *ModuleBase) SetTarget(target Target, primary bool) {
+func (a *ModuleBase) SetTarget(target Target, multiTargets []Target, primary bool) {
 	a.commonProperties.CompileTarget = target
+	a.commonProperties.CompileMultiTargets = multiTargets
 	a.commonProperties.CompilePrimary = primary
 }
 
@@ -481,6 +498,10 @@ func (a *ModuleBase) Target() Target {
 
 func (a *ModuleBase) TargetPrimary() bool {
 	return a.commonProperties.CompilePrimary
+}
+
+func (a *ModuleBase) MultiTargets() []Target {
+	return a.commonProperties.CompileMultiTargets
 }
 
 func (a *ModuleBase) Os() OsType {
@@ -599,6 +620,10 @@ func (p *ModuleBase) InstallInSanitizerDir() bool {
 
 func (p *ModuleBase) InstallInRecovery() bool {
 	return Bool(p.commonProperties.Recovery)
+}
+
+func (a *ModuleBase) Owner() string {
+	return String(a.commonProperties.Owner)
 }
 
 func (a *ModuleBase) generateModuleTarget(ctx ModuleContext) {
@@ -720,6 +745,7 @@ func (a *ModuleBase) androidBaseContextFactory(ctx blueprint.BaseModuleContext) 
 	return androidBaseContextImpl{
 		target:        a.commonProperties.CompileTarget,
 		targetPrimary: a.commonProperties.CompilePrimary,
+		multiTargets:  a.commonProperties.CompileMultiTargets,
 		kind:          determineModuleKind(a, ctx),
 		config:        ctx.Config().(Config),
 	}
@@ -774,6 +800,7 @@ func (a *ModuleBase) GenerateBuildActions(blueprintCtx blueprint.ModuleContext) 
 
 type androidBaseContextImpl struct {
 	target        Target
+	multiTargets  []Target
 	targetPrimary bool
 	debug         bool
 	kind          moduleKind
@@ -843,6 +870,13 @@ func convertBuildParams(params BuildParams) blueprint.BuildParams {
 	if params.Implicit != nil {
 		bparams.Implicits = append(bparams.Implicits, params.Implicit.String())
 	}
+
+	bparams.Outputs = proptools.NinjaEscape(bparams.Outputs)
+	bparams.ImplicitOutputs = proptools.NinjaEscape(bparams.ImplicitOutputs)
+	bparams.Inputs = proptools.NinjaEscape(bparams.Inputs)
+	bparams.Implicits = proptools.NinjaEscape(bparams.Implicits)
+	bparams.OrderOnly = proptools.NinjaEscape(bparams.OrderOnly)
+	bparams.Depfile = proptools.NinjaEscape([]string{bparams.Depfile})[0]
 
 	return bparams
 }
@@ -1004,6 +1038,10 @@ func (a *androidBaseContextImpl) TargetPrimary() bool {
 	return a.targetPrimary
 }
 
+func (a *androidBaseContextImpl) MultiTargets() []Target {
+	return a.multiTargets
+}
+
 func (a *androidBaseContextImpl) Arch() Arch {
 	return a.target.Arch
 }
@@ -1065,6 +1103,16 @@ func (a *androidBaseContextImpl) ProductSpecific() bool {
 
 func (a *androidBaseContextImpl) ProductServicesSpecific() bool {
 	return a.kind == productServicesSpecificModule
+}
+
+// Makes this module a platform module, i.e. not specific to soc, device,
+// product, or product_services.
+func (a *ModuleBase) MakeAsPlatform() {
+	a.commonProperties.Vendor = boolPtr(false)
+	a.commonProperties.Proprietary = boolPtr(false)
+	a.commonProperties.Soc_specific = boolPtr(false)
+	a.commonProperties.Product_specific = boolPtr(false)
+	a.commonProperties.Product_services_specific = boolPtr(false)
 }
 
 func (a *androidModuleContext) InstallInData() bool {
@@ -1505,16 +1553,16 @@ func (c *buildTargetSingleton) GenerateBuildActions(ctx SingletonContext) {
 	}
 }
 
-type AndroidModulesByName struct {
-	slice []Module
+type ModulesByName struct {
+	slice []blueprint.Module
 	ctx   interface {
 		ModuleName(blueprint.Module) string
 		ModuleSubDir(blueprint.Module) string
 	}
 }
 
-func (s AndroidModulesByName) Len() int { return len(s.slice) }
-func (s AndroidModulesByName) Less(i, j int) bool {
+func (s ModulesByName) Len() int { return len(s.slice) }
+func (s ModulesByName) Less(i, j int) bool {
 	mi, mj := s.slice[i], s.slice[j]
 	ni, nj := s.ctx.ModuleName(mi), s.ctx.ModuleName(mj)
 
@@ -1524,4 +1572,28 @@ func (s AndroidModulesByName) Less(i, j int) bool {
 		return s.ctx.ModuleSubDir(mi) < s.ctx.ModuleSubDir(mj)
 	}
 }
-func (s AndroidModulesByName) Swap(i, j int) { s.slice[i], s.slice[j] = s.slice[j], s.slice[i] }
+func (s ModulesByName) Swap(i, j int) { s.slice[i], s.slice[j] = s.slice[j], s.slice[i] }
+
+// Collect information for opening IDE project files in java/jdeps.go.
+type IDEInfo interface {
+	IDEInfo(ideInfo *IdeInfo)
+	BaseModuleName() string
+}
+
+// Extract the base module name from the Import name.
+// Often the Import name has a prefix "prebuilt_".
+// Remove the prefix explicitly if needed
+// until we find a better solution to get the Import name.
+type IDECustomizedModuleName interface {
+	IDECustomizedModuleName() string
+}
+
+type IdeInfo struct {
+	Deps              []string `json:"dependencies,omitempty"`
+	Srcs              []string `json:"srcs,omitempty"`
+	Aidl_include_dirs []string `json:"aidl_include_dirs,omitempty"`
+	Jarjar_rules      []string `json:"jarjar_rules,omitempty"`
+	Jars              []string `json:"jars,omitempty"`
+	Classes           []string `json:"class,omitempty"`
+	Installed_paths   []string `json:"installed,omitempty"`
+}

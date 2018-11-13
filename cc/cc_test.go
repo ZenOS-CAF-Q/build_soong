@@ -56,17 +56,17 @@ func createTestContext(t *testing.T, config android.Config, bp string) *android.
 	ctx.RegisterModuleType("cc_library", android.ModuleFactoryAdaptor(LibraryFactory))
 	ctx.RegisterModuleType("cc_library_shared", android.ModuleFactoryAdaptor(LibrarySharedFactory))
 	ctx.RegisterModuleType("cc_library_headers", android.ModuleFactoryAdaptor(LibraryHeaderFactory))
-	ctx.RegisterModuleType("toolchain_library", android.ModuleFactoryAdaptor(toolchainLibraryFactory))
+	ctx.RegisterModuleType("toolchain_library", android.ModuleFactoryAdaptor(ToolchainLibraryFactory))
 	ctx.RegisterModuleType("llndk_library", android.ModuleFactoryAdaptor(llndkLibraryFactory))
 	ctx.RegisterModuleType("llndk_headers", android.ModuleFactoryAdaptor(llndkHeadersFactory))
 	ctx.RegisterModuleType("vendor_public_library", android.ModuleFactoryAdaptor(vendorPublicLibraryFactory))
-	ctx.RegisterModuleType("cc_object", android.ModuleFactoryAdaptor(objectFactory))
+	ctx.RegisterModuleType("cc_object", android.ModuleFactoryAdaptor(ObjectFactory))
 	ctx.RegisterModuleType("filegroup", android.ModuleFactoryAdaptor(android.FileGroupFactory))
 	ctx.PreDepsMutators(func(ctx android.RegisterMutatorsContext) {
 		ctx.BottomUp("image", imageMutator).Parallel()
-		ctx.BottomUp("link", linkageMutator).Parallel()
+		ctx.BottomUp("link", LinkageMutator).Parallel()
 		ctx.BottomUp("vndk", vndkMutator).Parallel()
-		ctx.BottomUp("begin", beginMutator).Parallel()
+		ctx.BottomUp("begin", BeginMutator).Parallel()
 	})
 	ctx.Register()
 
@@ -76,18 +76,49 @@ func createTestContext(t *testing.T, config android.Config, bp string) *android.
 			name: "libatomic",
 			vendor_available: true,
 			recovery_available: true,
+			src: "",
 		}
 
 		toolchain_library {
 			name: "libcompiler_rt-extras",
 			vendor_available: true,
 			recovery_available: true,
+			src: "",
+		}
+
+		toolchain_library {
+			name: "libclang_rt.builtins-arm-android",
+			vendor_available: true,
+			recovery_available: true,
+			src: "",
+		}
+
+		toolchain_library {
+			name: "libclang_rt.builtins-aarch64-android",
+			vendor_available: true,
+			recovery_available: true,
+			src: "",
+		}
+
+		toolchain_library {
+			name: "libclang_rt.builtins-i686-android",
+			vendor_available: true,
+			recovery_available: true,
+			src: "",
+		}
+
+		toolchain_library {
+			name: "libclang_rt.builtins-x86_64-android",
+			vendor_available: true,
+			recovery_available: true,
+			src: "",
 		}
 
 		toolchain_library {
 			name: "libgcc",
 			vendor_available: true,
 			recovery_available: true,
+			src: "",
 		}
 
 		cc_library {
@@ -158,11 +189,13 @@ func createTestContext(t *testing.T, config android.Config, bp string) *android.
 		cc_object {
 			name: "crtbegin_so",
 			recovery_available: true,
+			vendor_available: true,
 		}
 
 		cc_object {
 			name: "crtend_so",
 			recovery_available: true,
+			vendor_available: true,
 		}
 
 		cc_library {
@@ -236,8 +269,9 @@ func testCcError(t *testing.T, pattern string, bp string) {
 }
 
 const (
-	coreVariant   = "android_arm64_armv8-a_core_shared"
-	vendorVariant = "android_arm64_armv8-a_vendor_shared"
+	coreVariant     = "android_arm64_armv8-a_core_shared"
+	vendorVariant   = "android_arm64_armv8-a_vendor_shared"
+	recoveryVariant = "android_arm64_armv8-a_recovery_shared"
 )
 
 func TestVendorSrc(t *testing.T) {
@@ -1674,6 +1708,11 @@ func TestRecovery(t *testing.T) {
 			recovery: true,
 			compile_multilib:"32",
 		}
+		cc_library_shared {
+			name: "libHalInRecovery",
+			recovery_available: true,
+			vendor: true,
+		}
 	`)
 
 	variants := ctx.ModuleVariantsForTests("librecovery")
@@ -1686,4 +1725,10 @@ func TestRecovery(t *testing.T) {
 	if android.InList(arm64, variants) {
 		t.Errorf("multilib was set to 32 for librecovery32, but its variants has %s.", arm64)
 	}
+
+	recoveryModule := ctx.ModuleForTests("libHalInRecovery", recoveryVariant).Module().(*Module)
+	if !recoveryModule.Platform() {
+		t.Errorf("recovery variant of libHalInRecovery must not specific to device, soc, or product")
+	}
+
 }

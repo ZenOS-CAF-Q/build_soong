@@ -93,13 +93,19 @@ var ClangUnknownLldflags = sorted([]string{
 })
 
 var ClangLibToolingUnknownCflags = []string{
+	// Remove -flto and other flto dependent flags.
 	"-flto*",
 	"-fsanitize*",
+	"-fwhole-program-vtables",
 }
 
 func init() {
 	pctx.StaticVariable("ClangExtraCflags", strings.Join([]string{
 		"-D__compiler_offsetof=__builtin_offsetof",
+
+		// Make implicit fallthrough an error in the future.
+		"-Wimplicit-fallthrough",
+		"-Wno-error=implicit-fallthrough",
 
 		// Help catch common 32/64-bit errors.
 		"-Werror=int-conversion",
@@ -176,6 +182,18 @@ func init() {
 		// Disable c++98-specific warning since Android is not concerned with C++98
 		// compatibility.
 		"-Wno-c++98-compat-extra-semi",
+
+		// Disable this warning until we can fix all instances where it fails.
+		"-Wno-self-assign-overloaded",
+
+		// Disable this warning until we can fix all instances where it fails.
+		"-Wno-constant-logical-operand",
+
+		// Disable this warning because we don't care about behavior with older compilers.
+		"-Wno-return-std-move-in-c++11",
+
+		// Disable this warning until we can fix all instances where it fails.
+		"-Wno-dangling-field",
 	}, " "))
 
 	// Extra cflags for projects under external/ directory to disable warnings that are infeasible

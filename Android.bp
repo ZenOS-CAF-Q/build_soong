@@ -134,7 +134,6 @@ bootstrap_go_package {
         "cc/pgo.go",
         "cc/prebuilt.go",
         "cc/proto.go",
-        "cc/relocation_packer.go",
         "cc/rs.go",
         "cc/sanitize.go",
         "cc/sabi.go",
@@ -193,6 +192,9 @@ bootstrap_go_package {
     srcs: [
         "genrule/genrule.go",
     ],
+    testSrcs: [
+        "genrule/genrule_test.go",
+    ],
     pluginFor: ["soong_build"],
 }
 
@@ -236,6 +238,7 @@ bootstrap_go_package {
         "java/genrule.go",
         "java/jacoco.go",
         "java/java.go",
+        "java/jdeps.go",
         "java/java_resources.go",
         "java/prebuilt_apis.go",
         "java/proto.go",
@@ -246,6 +249,7 @@ bootstrap_go_package {
     testSrcs: [
         "java/app_test.go",
         "java/java_test.go",
+        "java/jdeps_test.go",
     ],
     pluginFor: ["soong_build"],
 }
@@ -356,9 +360,19 @@ toolchain_library {
     defaults: ["linux_bionic_supported"],
     vendor_available: true,
     recovery_available: true,
+
     arch: {
         arm: {
-            instruction_set: "arm",
+            src: "prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/arm-linux-androideabi/lib/libatomic.a",
+        },
+        arm64: {
+            src: "prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/aarch64-linux-android/lib64/libatomic.a",
+        },
+        x86: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/x86_64-linux-android/lib/libatomic.a",
+        },
+        x86_64: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/x86_64-linux-android/lib64/libatomic.a",
         },
     },
 }
@@ -368,9 +382,19 @@ toolchain_library {
     defaults: ["linux_bionic_supported"],
     vendor_available: true,
     recovery_available: true,
+
     arch: {
         arm: {
-            instruction_set: "arm",
+            src: "prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/lib/gcc/arm-linux-androideabi/4.9.x/libgcc.a",
+        },
+        arm64: {
+            src: "prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/lib/gcc/aarch64-linux-android/4.9.x/libgcc.a",
+        },
+        x86: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/32/libgcc.a",
+        },
+        x86_64: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/libgcc.a",
         },
     },
 }
@@ -383,15 +407,31 @@ toolchain_library {
         windows: {
             enabled: true,
         },
+        windows_x86: {
+            src: "prebuilts/gcc/linux-x86/host/x86_64-w64-mingw32-4.8/x86_64-w64-mingw32/lib32/libwinpthread.a",
+        },
+        windows_x86_64: {
+            src: "prebuilts/gcc/linux-x86/host/x86_64-w64-mingw32-4.8/x86_64-w64-mingw32/lib/libwinpthread.a",
+        },
     },
 }
 
 toolchain_library {
     name: "libgcov",
     defaults: ["linux_bionic_supported"],
+
     arch: {
         arm: {
-            instruction_set: "arm",
+            src: "prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/lib/gcc/arm-linux-androideabi/4.9.x/libgcov.a",
+        },
+        arm64: {
+            src: "prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/lib/gcc/aarch64-linux-android/4.9.x/libgcov.a",
+        },
+        x86: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/32/libgcov.a",
+        },
+        x86_64: {
+            src: "prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/lib/gcc/x86_64-linux-android/4.9.x/libgcov.a",
         },
     },
 }

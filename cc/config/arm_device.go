@@ -162,6 +162,7 @@ func init() {
 		"cortex-a53",
 		"cortex-a53-a57",
 		"cortex-a55",
+		"cortex-a72",
 		"cortex-a73",
 		"cortex-a75",
 		"krait",
@@ -269,6 +270,7 @@ var (
 		"cortex-a53":     "${config.ArmCortexA53Cflags}",
 		"cortex-a53.a57": "${config.ArmCortexA53Cflags}",
 		"cortex-a55":     "${config.ArmCortexA55Cflags}",
+		"cortex-a72":     "${config.ArmCortexA53Cflags}",
 		"cortex-a73":     "${config.ArmCortexA53Cflags}",
 		"cortex-a75":     "${config.ArmCortexA55Cflags}",
 		"krait":          "${config.ArmKraitCflags}",
@@ -292,6 +294,7 @@ var (
 		"cortex-a53":     "${config.ArmClangCortexA53Cflags}",
 		"cortex-a53.a57": "${config.ArmClangCortexA53Cflags}",
 		"cortex-a55":     "${config.ArmClangCortexA55Cflags}",
+		"cortex-a72":     "${config.ArmClangCortexA53Cflags}",
 		"cortex-a73":     "${config.ArmClangCortexA53Cflags}",
 		"cortex-a75":     "${config.ArmClangCortexA55Cflags}",
 		"krait":          "${config.ArmClangKraitCflags}",
@@ -345,17 +348,6 @@ func (t *toolchainArm) IncludeFlags() string {
 	return "${config.ArmIncludeFlags}"
 }
 
-func (t *toolchainArm) InstructionSetFlags(isa string) (string, error) {
-	switch isa {
-	case "arm":
-		return "${config.ArmArmCflags}", nil
-	case "thumb", "":
-		return "${config.ArmThumbCflags}", nil
-	default:
-		return t.toolchainBase.InstructionSetFlags(isa)
-	}
-}
-
 func (t *toolchainArm) ClangTriple() string {
 	// http://b/72619014 work around llvm LTO bug.
 	return "armv7a-linux-androideabi"
@@ -397,7 +389,7 @@ func (t *toolchainArm) ClangInstructionSetFlags(isa string) (string, error) {
 	}
 }
 
-func (toolchainArm) SanitizerRuntimeLibraryArch() string {
+func (toolchainArm) LibclangRuntimeLibraryArch() string {
 	return "arm"
 }
 

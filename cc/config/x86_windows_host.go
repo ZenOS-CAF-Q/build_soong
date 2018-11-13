@@ -62,6 +62,8 @@ var (
 
 	windowsLdflags = []string{
 		"--enable-stdcall-fixup",
+		"-Wl,--dynamicbase",
+		"-Wl,--nxcompat",
 	}
 	windowsClangLdflags  = append(ClangFilterUnknownCflags(windowsLdflags), []string{}...)
 	windowsClangLldflags = ClangFilterUnknownLldflags(windowsClangLdflags)
@@ -96,6 +98,7 @@ var (
 		"-m64",
 		"-L${WindowsGccRoot}/${WindowsGccTriple}/lib64",
 		"-static-libgcc",
+		"-Wl,--high-entropy-va",
 	}
 	windowsX8664ClangLdflags = append(ClangFilterUnknownCflags(windowsX8664Ldflags), []string{
 		"-B${WindowsGccRoot}/${WindowsGccTriple}/bin",
@@ -103,9 +106,6 @@ var (
 		"-L${WindowsGccRoot}/lib/gcc/${WindowsGccTriple}/4.8.3",
 		"-B${WindowsGccRoot}/${WindowsGccTriple}/lib64",
 		"-pthread",
-		// Bug: http://b/109759970 - WAR until issue with ld.bfd's
-		// inability to handle Clang-generated section names is fixed.
-		"-Wl,--allow-multiple-definition",
 	}...)
 	windowsX8664ClangLldflags = ClangFilterUnknownLldflags(windowsX8664ClangLdflags)
 
@@ -228,10 +228,6 @@ func (t *toolchainWindowsX86) WindresFlags() string {
 
 func (t *toolchainWindowsX8664) WindresFlags() string {
 	return "-F pe-x86-64"
-}
-
-func (t *toolchainWindows) ClangSupported() bool {
-	return true
 }
 
 func (t *toolchainWindowsX86) ClangTriple() string {

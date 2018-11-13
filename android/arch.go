@@ -201,7 +201,7 @@ var (
 	osArchTypeMap = map[OsType][]ArchType{
 		Linux:       []ArchType{X86, X86_64},
 		LinuxBionic: []ArchType{X86_64},
-		Darwin:      []ArchType{X86, X86_64},
+		Darwin:      []ArchType{X86_64},
 		Windows:     []ArchType{X86, X86_64},
 		Android:     []ArchType{Arm, Arm64, Mips, Mips64, X86, X86_64},
 	}
@@ -288,6 +288,30 @@ func (target Target) String() string {
 	return target.Os.String() + "_" + target.Arch.String()
 }
 
+// archMutator splits a module into a variant for each Target requested by the module.  Target selection
+// for a module is in three levels, OsClass, mulitlib, and then Target.
+// OsClass selection is determined by:
+//    - The HostOrDeviceSupported value passed in to InitAndroidArchModule by the module type factory, which selects
+//      whether the module type can compile for host, device or both.
+//    - The host_supported and device_supported properties on the module.
+// If host is supported for the module, the Host and HostCross OsClasses are  are selected.  If device is supported
+// for the module, the Device OsClass is selected.
+// Within each selected OsClass, the multilib selection is determined by:
+//    - The compile_multilib property if it set (which may be overriden by target.android.compile_multlib or
+//      target.host.compile_multilib).
+//    - The default multilib passed to InitAndroidArchModule if compile_multilib was not set.
+// Valid multilib values include:
+//    "both": compile for all Targets supported by the OsClass (generally x86_64 and x86, or arm64 and arm).
+//    "first": compile for only a single preferred Target supported by the OsClass.  This is generally x86_64 or arm64,
+//        but may be arm for a 32-bit only build or a build with TARGET_PREFER_32_BIT=true set.
+//    "32": compile for only a single 32-bit Target supported by the OsClass.
+//    "64": compile for only a single 64-bit Target supported by the OsClass.
+//    "common": compile a for a single Target that will work on all Targets suported by the OsClass (for example Java).
+//
+// Once the list of Targets is determined, the module is split into a variant for each Target.
+//
+// Modules can be initialized with InitAndroidMultiTargetsArchModule, in which case they will be split by OsClass,
+// but will have a common Target that is expected to handle all other selected Targets via ctx.MultiTargets().
 func archMutator(mctx BottomUpMutatorContext) {
 	var module Module
 	var ok bool
@@ -295,57 +319,57 @@ func archMutator(mctx BottomUpMutatorContext) {
 		return
 	}
 
-	if !module.base().ArchSpecific() {
+	base := module.base()
+
+	if !base.ArchSpecific() {
 		return
 	}
 
-	osClasses := module.base().OsClassSupported()
+	osClasses := base.OsClassSupported()
 
 	var moduleTargets []Target
+	moduleMultiTargets := make(map[int][]Target)
 	primaryModules := make(map[int]bool)
 
 	for _, class := range osClasses {
-		targets := mctx.Config().Targets[class]
-		if len(targets) == 0 {
+		classTargets := mctx.Config().Targets[class]
+		if len(classTargets) == 0 {
 			continue
 		}
-		var multilib string
-		switch class {
-		case Device:
-			multilib = String(module.base().commonProperties.Target.Android.Compile_multilib)
-		case Host, HostCross:
-			multilib = String(module.base().commonProperties.Target.Host.Compile_multilib)
-		}
-		if multilib == "" {
-			multilib = String(module.base().commonProperties.Compile_multilib)
-		}
-		if multilib == "" {
-			multilib = module.base().commonProperties.Default_multilib
-		}
-		var prefer32 bool
-		switch class {
-		case Device:
-			prefer32 = mctx.Config().DevicePrefer32BitExecutables()
-		case HostCross:
-			// Windows builds always prefer 32-bit
-			prefer32 = true
-		}
+
 		// only the primary arch in the recovery partition
 		if module.InstallInRecovery() {
-			targets = []Target{mctx.Config().Targets[Device][0]}
+			classTargets = []Target{mctx.Config().Targets[Device][0]}
 		}
-		targets, err := decodeMultilib(multilib, targets, prefer32)
+
+		prefer32 := false
+		if base.prefer32 != nil {
+			prefer32 = base.prefer32(mctx, base, class)
+		}
+
+		multilib, extraMultilib := decodeMultilib(base, class)
+		targets, err := decodeMultilibTargets(multilib, classTargets, prefer32)
 		if err != nil {
 			mctx.ModuleErrorf("%s", err.Error())
 		}
+
+		var multiTargets []Target
+		if extraMultilib != "" {
+			multiTargets, err = decodeMultilibTargets(extraMultilib, classTargets, prefer32)
+			if err != nil {
+				mctx.ModuleErrorf("%s", err.Error())
+			}
+		}
+
 		if len(targets) > 0 {
 			primaryModules[len(moduleTargets)] = true
+			moduleMultiTargets[len(moduleTargets)] = multiTargets
 			moduleTargets = append(moduleTargets, targets...)
 		}
 	}
 
 	if len(moduleTargets) == 0 {
-		module.base().commonProperties.Enabled = boolPtr(false)
+		base.commonProperties.Enabled = boolPtr(false)
 		return
 	}
 
@@ -357,8 +381,34 @@ func archMutator(mctx BottomUpMutatorContext) {
 
 	modules := mctx.CreateVariations(targetNames...)
 	for i, m := range modules {
-		m.(Module).base().SetTarget(moduleTargets[i], primaryModules[i])
+		m.(Module).base().SetTarget(moduleTargets[i], moduleMultiTargets[i], primaryModules[i])
 		m.(Module).base().setArchProperties(mctx)
+	}
+}
+
+func decodeMultilib(base *ModuleBase, class OsClass) (multilib, extraMultilib string) {
+	switch class {
+	case Device:
+		multilib = String(base.commonProperties.Target.Android.Compile_multilib)
+	case Host, HostCross:
+		multilib = String(base.commonProperties.Target.Host.Compile_multilib)
+	}
+	if multilib == "" {
+		multilib = String(base.commonProperties.Compile_multilib)
+	}
+	if multilib == "" {
+		multilib = base.commonProperties.Default_multilib
+	}
+
+	if base.commonProperties.UseTargetVariants {
+		return multilib, ""
+	} else {
+		// For app modules a single arch variant will be created per OS class which is expected to handle all the
+		// selected arches.  Return the common-type as multilib and any Android.bp provided multilib as extraMultilib
+		if multilib == base.commonProperties.Default_multilib {
+			multilib = "first"
+		}
+		return base.commonProperties.Default_multilib, multilib
 	}
 }
 
@@ -959,6 +1009,7 @@ func getMegaDeviceConfig() []archConfig {
 		{"arm", "armv7-a-neon", "cortex-a15", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "cortex-a53", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "cortex-a53.a57", []string{"armeabi-v7a"}},
+		{"arm", "armv7-a-neon", "cortex-a72", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "cortex-a73", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "cortex-a75", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "denver", []string{"armeabi-v7a"}},
@@ -967,6 +1018,7 @@ func getMegaDeviceConfig() []archConfig {
 		{"arm", "armv7-a-neon", "exynos-m1", []string{"armeabi-v7a"}},
 		{"arm", "armv7-a-neon", "exynos-m2", []string{"armeabi-v7a"}},
 		{"arm64", "armv8-a", "cortex-a53", []string{"arm64-v8a"}},
+		{"arm64", "armv8-a", "cortex-a72", []string{"arm64-v8a"}},
 		{"arm64", "armv8-a", "cortex-a73", []string{"arm64-v8a"}},
 		{"arm64", "armv8-a", "denver64", []string{"arm64-v8a"}},
 		{"arm64", "armv8-a", "kryo", []string{"arm64-v8a"}},
@@ -1100,18 +1152,18 @@ func getCommonTargets(targets []Target) []Target {
 	return ret
 }
 
-func preferTargets(targets []Target, filters ...string) []Target {
+func firstTarget(targets []Target, filters ...string) []Target {
 	for _, filter := range filters {
 		buildTargets := filterMultilibTargets(targets, filter)
 		if len(buildTargets) > 0 {
-			return buildTargets
+			return buildTargets[:1]
 		}
 	}
 	return nil
 }
 
 // Use the module multilib setting to select one or more targets from a target list
-func decodeMultilib(multilib string, targets []Target, prefer32 bool) ([]Target, error) {
+func decodeMultilibTargets(multilib string, targets []Target, prefer32 bool) ([]Target, error) {
 	buildTargets := []Target{}
 
 	switch multilib {
@@ -1120,9 +1172,9 @@ func decodeMultilib(multilib string, targets []Target, prefer32 bool) ([]Target,
 	case "common_first":
 		buildTargets = getCommonTargets(targets)
 		if prefer32 {
-			buildTargets = append(buildTargets, preferTargets(targets, "lib32", "lib64")...)
+			buildTargets = append(buildTargets, firstTarget(targets, "lib32", "lib64")...)
 		} else {
-			buildTargets = append(buildTargets, preferTargets(targets, "lib64", "lib32")...)
+			buildTargets = append(buildTargets, firstTarget(targets, "lib64", "lib32")...)
 		}
 	case "both":
 		if prefer32 {
@@ -1138,12 +1190,15 @@ func decodeMultilib(multilib string, targets []Target, prefer32 bool) ([]Target,
 		buildTargets = filterMultilibTargets(targets, "lib64")
 	case "first":
 		if prefer32 {
-			buildTargets = preferTargets(targets, "lib32", "lib64")
+			buildTargets = firstTarget(targets, "lib32", "lib64")
 		} else {
-			buildTargets = preferTargets(targets, "lib64", "lib32")
+			buildTargets = firstTarget(targets, "lib64", "lib32")
 		}
 	case "prefer32":
-		buildTargets = preferTargets(targets, "lib32", "lib64")
+		buildTargets = filterMultilibTargets(targets, "lib32")
+		if len(buildTargets) == 0 {
+			buildTargets = filterMultilibTargets(targets, "lib64")
+		}
 	default:
 		return nil, fmt.Errorf(`compile_multilib must be "both", "first", "32", "64", or "prefer32" found %q`,
 			multilib)

@@ -43,8 +43,8 @@ type variableProperties struct {
 		} `android:"arch_variant"`
 
 		Malloc_not_svelte struct {
-			Cflags []string
-		}
+			Cflags []string `android:"arch_variant"`
+		} `android:"arch_variant"`
 
 		Safestack struct {
 			Cflags []string `android:"arch_variant"`
@@ -193,7 +193,6 @@ type productVariables struct {
 	Eng                        *bool `json:",omitempty"`
 	Device_uses_hwc2           *bool `json:",omitempty"`
 	Treble_linker_namespaces   *bool `json:",omitempty"`
-	Sepolicy_split             *bool `json:",omitempty"`
 	Enforce_vintf_manifest     *bool `json:",omitempty"`
 	Pdk                        *bool `json:",omitempty"`
 	Uml                        *bool `json:",omitempty"`
@@ -223,6 +222,7 @@ type productVariables struct {
 	CoveragePaths        *[]string `json:",omitempty"`
 	CoverageExcludePaths *[]string `json:",omitempty"`
 
+	DevicePrefer32BitApps        *bool `json:",omitempty"`
 	DevicePrefer32BitExecutables *bool `json:",omitempty"`
 	HostPrefer32BitExecutables   *bool `json:",omitempty"`
 

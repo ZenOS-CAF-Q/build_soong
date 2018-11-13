@@ -17,7 +17,10 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	//"io/ioutil"
 	"os"
+	//"path"
+	//"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -122,7 +125,6 @@ var (
 
 	CStdVersion               = "gnu99"
 	CppStdVersion             = "gnu++14"
-	GccCppStdVersion          = "gnu++11"
 	ExperimentalCStdVersion   = "gnu11"
 	ExperimentalCppStdVersion = "gnu++1z"
 
@@ -132,8 +134,8 @@ var (
 
 	// prebuilts/clang default settings.
 	ClangDefaultBase         = "prebuilts/clang/host"
-	ClangDefaultVersion      = "clang-r328903"
-	ClangDefaultShortVersion = "7.0.2"
+	ClangDefaultVersion      = "clang-r339409"
+	ClangDefaultShortVersion = "8.0.1"
 
 	// Directories with warnings from Android.bp files.
 	WarningAllowedProjects = []string{
@@ -152,19 +154,13 @@ func init() {
 		commonGlobalCflags = append(commonGlobalCflags, "-fdebug-prefix-map=/proc/self/cwd=")
 	}
 
-	pctx.StaticVariable("CommonGlobalCflags", strings.Join(commonGlobalCflags, " "))
 	pctx.StaticVariable("CommonGlobalConlyflags", strings.Join(commonGlobalConlyflags, " "))
-	pctx.StaticVariable("DeviceGlobalCflags", strings.Join(deviceGlobalCflags, " "))
 	pctx.StaticVariable("DeviceGlobalCppflags", strings.Join(deviceGlobalCppflags, " "))
 	pctx.StaticVariable("DeviceGlobalLdflags", strings.Join(deviceGlobalLdflags, " "))
 	pctx.StaticVariable("DeviceGlobalLldflags", strings.Join(deviceGlobalLldflags, " "))
-	pctx.StaticVariable("HostGlobalCflags", strings.Join(hostGlobalCflags, " "))
 	pctx.StaticVariable("HostGlobalCppflags", strings.Join(hostGlobalCppflags, " "))
 	pctx.StaticVariable("HostGlobalLdflags", strings.Join(hostGlobalLdflags, " "))
 	pctx.StaticVariable("HostGlobalLldflags", strings.Join(hostGlobalLldflags, " "))
-	pctx.StaticVariable("NoOverrideGlobalCflags", strings.Join(noOverrideGlobalCflags, " "))
-
-	pctx.StaticVariable("CommonGlobalCppflags", strings.Join(commonGlobalCppflags, " "))
 
 	pctx.StaticVariable("CommonClangGlobalCflags",
 		strings.Join(append(ClangFilterUnknownCflags(commonGlobalCflags), "${ClangExtraCflags}"), " "))
@@ -216,6 +212,7 @@ func init() {
 	})
 	pctx.StaticVariable("ClangPath", "${ClangBase}/${HostPrebuiltTag}/${ClangVersion}")
 	pctx.StaticVariable("ClangBin", "${ClangPath}/bin")
+	pctx.StaticVariable("ClangTidyShellPath", "build/soong/scripts/clang-tidy.sh")
 
 	pctx.VariableFunc("ClangShortVersion", func(ctx android.PackageVarContext) string {
 		if override := ctx.Config().Getenv("LLVM_RELEASE_VERSION"); override != "" {
@@ -404,6 +401,31 @@ func setSdclangVars() {
 		}
 		return sdclangAEFlag + " " + sdclangFlags2
 	})
+
+	// Find the path to SDLLVM's ASan libraries
+	// TODO (b/117846004): Disable setting SDClangAsanLibDir due to unit test path issues
+	//absPath := sdclangPath
+	//if envPath := android.SdclangEnv["SDCLANG_PATH"]; envPath != "" {
+	//	absPath = envPath
+	//}
+	//if !filepath.IsAbs(absPath) {
+	//	absPath = path.Join(androidRoot, absPath)
+	//}
+	//
+	//libDirPrefix := "../lib/clang"
+	//libDir, err := ioutil.ReadDir(path.Join(absPath, libDirPrefix))
+	//if err != nil {
+	//	libDirPrefix = "../lib64/clang"
+	//	libDir, err = ioutil.ReadDir(path.Join(absPath, libDirPrefix))
+	//}
+	//if err != nil {
+	//	panic(err)
+	//}
+	//if len(libDir) != 1 || !libDir[0].IsDir() {
+	//	panic("Failed to find sanitizer libraries")
+	//}
+	//
+	//pctx.StaticVariable("SDClangAsanLibDir", path.Join(absPath, libDirPrefix, libDir[0].Name(), "lib/linux"))
 }
 
 var HostPrebuiltTag = pctx.VariableConfigMethod("HostPrebuiltTag", android.Config.PrebuiltOS)

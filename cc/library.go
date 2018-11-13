@@ -210,7 +210,6 @@ type libraryDecorator struct {
 
 	flagExporter
 	stripper
-	relocationPacker
 
 	// If we're used as a whole_static_lib, our missing dependencies need
 	// to be given
@@ -238,6 +237,9 @@ type libraryDecorator struct {
 	// not included in the NDK.
 	ndkSysrootPath android.Path
 
+	// Location of the linked, unstripped library for shared libraries
+	unstrippedOutputFile android.Path
+
 	// Decorated interafaces
 	*baseCompiler
 	*baseLinker
@@ -251,8 +253,7 @@ func (library *libraryDecorator) linkerProps() []interface{} {
 		&library.Properties,
 		&library.MutatedProperties,
 		&library.flagExporter.Properties,
-		&library.stripper.StripProperties,
-		&library.relocationPacker.Properties)
+		&library.stripper.StripProperties)
 }
 
 func (library *libraryDecorator) linkerFlags(ctx ModuleContext, flags Flags) Flags {
@@ -273,11 +274,6 @@ func (library *libraryDecorator) linkerFlags(ctx ModuleContext, flags Flags) Fla
 
 	if library.shared() {
 		libName := library.getLibName(ctx)
-		// GCC for Android assumes that -shared means -Bsymbolic, use -Wl,-shared instead
-		sharedFlag := "-Wl,-shared"
-		if flags.Clang || ctx.Host() {
-			sharedFlag = "-shared"
-		}
 		var f []string
 		if ctx.toolchain().Bionic() {
 			f = append(f,
@@ -299,7 +295,7 @@ func (library *libraryDecorator) linkerFlags(ctx ModuleContext, flags Flags) Fla
 			}
 		} else {
 			f = append(f,
-				sharedFlag,
+				"-shared",
 				"-Wl,-soname,"+libName+flags.Toolchain.ShlibSuffix())
 		}
 
@@ -428,8 +424,6 @@ func (library *libraryDecorator) linkerInit(ctx BaseModuleContext) {
 	library.baseInstaller.location = location
 
 	library.baseLinker.linkerInit(ctx)
-
-	library.relocationPacker.packingInit(ctx)
 }
 
 func (library *libraryDecorator) linkerDeps(ctx DepsContext, deps Deps) Deps {
@@ -548,31 +542,24 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 
 	builderFlags := flagsToBuilderFlags(flags)
 
-	if !ctx.Darwin() && !ctx.Windows() {
-		// Optimize out relinking against shared libraries whose interface hasn't changed by
-		// depending on a table of contents file instead of the library itself.
-		tocPath := outputFile.RelPathString()
-		tocPath = pathtools.ReplaceExtension(tocPath, flags.Toolchain.ShlibSuffix()[1:]+".toc")
-		tocFile := android.PathForOutput(ctx, tocPath)
-		library.tocFile = android.OptionalPathForPath(tocFile)
-		TransformSharedObjectToToc(ctx, outputFile, tocFile, builderFlags)
-	}
-
-	if library.relocationPacker.needsPacking(ctx) {
-		packedOutputFile := outputFile
-		outputFile = android.PathForModuleOut(ctx, "unpacked", fileName)
-		library.relocationPacker.pack(ctx, outputFile, packedOutputFile, builderFlags)
-	}
+	// Optimize out relinking against shared libraries whose interface hasn't changed by
+	// depending on a table of contents file instead of the library itself.
+	tocPath := outputFile.RelPathString()
+	tocPath = pathtools.ReplaceExtension(tocPath, flags.Toolchain.ShlibSuffix()[1:]+".toc")
+	tocFile := android.PathForOutput(ctx, tocPath)
+	library.tocFile = android.OptionalPathForPath(tocFile)
+	TransformSharedObjectToToc(ctx, outputFile, tocFile, builderFlags)
 
 	if library.stripper.needsStrip(ctx) {
 		// b/80093681, GNU strip/objcopy bug.
 		// Use llvm-{strip,objcopy} when clang lld is used.
-		builderFlags.stripUseLlvmStrip =
-			flags.Clang && library.baseLinker.useClangLld(ctx)
+		builderFlags.stripUseLlvmStrip = library.baseLinker.useClangLld(ctx)
 		strippedOutputFile := outputFile
 		outputFile = android.PathForModuleOut(ctx, "unstripped", fileName)
 		library.stripper.strip(ctx, outputFile, strippedOutputFile, builderFlags)
 	}
+
+	library.unstrippedOutputFile = outputFile
 
 	if Bool(library.baseLinker.Properties.Use_version_lib) && ctx.Host() {
 		versionedOutputFile := outputFile
@@ -604,7 +591,7 @@ func (library *libraryDecorator) linkShared(ctx ModuleContext,
 }
 
 func getRefAbiDumpFile(ctx ModuleContext, vndkVersion, fileName string) android.Path {
-	isLlndk := inList(ctx.baseModuleName(), llndkLibraries)
+	isLlndk := inList(ctx.baseModuleName(), llndkLibraries) || inList(ctx.baseModuleName(), ndkMigratedLibs)
 
 	refAbiDumpTextFile := android.PathForVndkRefAbiDump(ctx, vndkVersion, fileName, isLlndk, false)
 	refAbiDumpGzipFile := android.PathForVndkRefAbiDump(ctx, vndkVersion, fileName, isLlndk, true)
@@ -828,7 +815,7 @@ func reuseStaticLibrary(mctx android.BottomUpMutatorContext, static, shared *Mod
 	}
 }
 
-func linkageMutator(mctx android.BottomUpMutatorContext) {
+func LinkageMutator(mctx android.BottomUpMutatorContext) {
 	if m, ok := mctx.Module().(*Module); ok && m.linker != nil {
 		if library, ok := m.linker.(libraryInterface); ok {
 			var modules []blueprint.Module

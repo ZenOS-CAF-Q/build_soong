@@ -156,7 +156,7 @@ func (a *aapt) deps(ctx android.BottomUpMutatorContext, sdkContext sdkContext) {
 	if !ctx.Config().UnbundledBuild() {
 		sdkDep := decodeSdkDep(ctx, sdkContext)
 		if sdkDep.frameworkResModule != "" {
-			ctx.AddDependency(ctx.Module(), frameworkResTag, sdkDep.frameworkResModule)
+			ctx.AddVariationDependencies(nil, frameworkResTag, sdkDep.frameworkResModule)
 		}
 	}
 }
@@ -359,7 +359,7 @@ func AndroidLibraryFactory() android.Module {
 
 	module.androidLibraryProperties.BuildAAR = true
 
-	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	InitJavaModule(module, android.DeviceSupported)
 	return module
 }
 
@@ -375,10 +375,14 @@ type AARImportProperties struct {
 
 	Static_libs []string
 	Libs        []string
+
+	// if set to true, run Jetifier against .aar file. Defaults to false.
+	Jetifier_enabled *bool
 }
 
 type AARImport struct {
 	android.ModuleBase
+	android.DefaultableModuleBase
 	prebuilt android.Prebuilt
 
 	properties AARImportProperties
@@ -433,12 +437,12 @@ func (a *AARImport) DepsMutator(ctx android.BottomUpMutatorContext) {
 	if !ctx.Config().UnbundledBuild() {
 		sdkDep := decodeSdkDep(ctx, sdkContext(a))
 		if sdkDep.useModule && sdkDep.frameworkResModule != "" {
-			ctx.AddDependency(ctx.Module(), frameworkResTag, sdkDep.frameworkResModule)
+			ctx.AddVariationDependencies(nil, frameworkResTag, sdkDep.frameworkResModule)
 		}
 	}
 
-	ctx.AddDependency(ctx.Module(), libTag, a.properties.Libs...)
-	ctx.AddDependency(ctx.Module(), staticLibTag, a.properties.Static_libs...)
+	ctx.AddVariationDependencies(nil, libTag, a.properties.Libs...)
+	ctx.AddVariationDependencies(nil, staticLibTag, a.properties.Static_libs...)
 }
 
 // Unzip an AAR into its constituent files and directories.  Any files in Outputs that don't exist in the AAR will be
@@ -456,7 +460,14 @@ func (a *AARImport) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 		return
 	}
 
-	aar := android.PathForModuleSrc(ctx, a.properties.Aars[0])
+	aarName := ctx.ModuleName() + ".aar"
+	var aar android.Path
+	aar = android.PathForModuleSrc(ctx, a.properties.Aars[0])
+	if Bool(a.properties.Jetifier_enabled) {
+		inputFile := aar
+		aar = android.PathForModuleOut(ctx, "jetifier", aarName)
+		TransformJetifier(ctx, aar.(android.WritablePath), inputFile)
+	}
 
 	extractedAARDir := android.PathForModuleOut(ctx, "aar")
 	extractedResDir := extractedAARDir.Join(ctx, "res")
@@ -545,6 +556,6 @@ func AARImportFactory() android.Module {
 	module.AddProperties(&module.properties)
 
 	android.InitPrebuiltModule(module, &module.properties.Aars)
-	android.InitAndroidArchModule(module, android.DeviceSupported, android.MultilibCommon)
+	InitJavaModule(module, android.DeviceSupported)
 	return module
 }
