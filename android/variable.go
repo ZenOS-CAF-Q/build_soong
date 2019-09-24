@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 
+	"zen/soong/android"
+
 	"github.com/google/blueprint/proptools"
 )
 
@@ -152,6 +154,9 @@ type variableProperties struct {
 		Device_support_hwfde_perf struct {
 			Cflags []string
 		}
+
+		// include Zen variables
+		Zen android.Product_variables
 	} `android:"arch_variant"`
 }
 
@@ -319,6 +324,9 @@ type productVariables struct {
 	ProductHiddenAPIStubsTest   []string `json:",omitempty"`
 
 	TargetFSConfigGen []string `json:",omitempty"`
+
+	// include Zen variables
+	Zen android.ProductVariables
 }
 
 func boolPtr(v bool) *bool {
